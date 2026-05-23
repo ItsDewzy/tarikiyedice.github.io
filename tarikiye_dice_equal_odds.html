@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@400;600;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Rajdhani',sans-serif;min-height:100vh;overflow-x:hidden;background:#08080f;}
+#bg-canvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;}
+.app{position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1rem;gap:1.5rem;}
+.title-wrap{text-align:center;}
+.site-title{font-family:'Orbitron',monospace;font-size:clamp(1.5rem,5vw,3rem);font-weight:900;letter-spacing:0.08em;background:linear-gradient(135deg,#fff 0%,#c4b5fd 30%,#f9a8d4 60%,#fdba74 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:titlePulse 3s ease-in-out infinite;}
+.site-subtitle{font-size:0.82rem;color:rgba(255,255,255,0.35);letter-spacing:0.4em;text-transform:uppercase;margin-top:5px;font-weight:600;}
+@keyframes titlePulse{0%,100%{filter:drop-shadow(0 0 18px rgba(196,181,253,0.45))}50%{filter:drop-shadow(0 0 36px rgba(249,168,212,0.65))}}
+.controls-row{display:flex;align-items:center;gap:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.09);border-radius:14px;padding:10px 22px;}
+.ctrl-label{color:rgba(255,255,255,0.38);font-size:0.76rem;letter-spacing:0.15em;text-transform:uppercase;}
+.dice-count-btns{display:flex;gap:6px;}
+.count-btn{width:34px;height:34px;border-radius:9px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.5);font-size:0.95rem;font-weight:700;cursor:pointer;font-family:'Rajdhani',sans-serif;transition:all 0.18s;}
+.count-btn:hover{background:rgba(255,255,255,0.12);color:#fff;border-color:rgba(255,255,255,0.22);transform:translateY(-1px);}
+.count-btn.active{background:rgba(167,139,250,0.22);border-color:#a78bfa;color:#fff;}
+.dice-area{display:flex;gap:22px;align-items:center;justify-content:center;flex-wrap:wrap;min-height:130px;perspective:1000px;}
+.die-wrap{position:relative;transition:transform 0.2s;}
+.die-wrap:hover .die{transform:translateY(-6px) scale(1.07);}
+.die{width:108px;height:108px;border-radius:22px;display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer;transition:transform 0.25s,box-shadow 0.3s;transform-style:preserve-3d;}
+.die-shine{position:absolute;inset:0;border-radius:22px;background:linear-gradient(140deg,rgba(255,255,255,0.28) 0%,rgba(255,255,255,0.06) 45%,transparent 70%);pointer-events:none;z-index:2;}
+.die-dot{width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,0.92);box-shadow:0 2px 8px rgba(0,0,0,0.5),inset 0 1px 3px rgba(255,255,255,0.8);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1;}
+.die.rolling{animation:spinRoll 0.7s cubic-bezier(0.22,0.61,0.36,1) forwards;}
+@keyframes spinRoll{0%{transform:rotateY(0deg) rotateX(0deg) scale(1);}20%{transform:rotateY(120deg) rotateX(60deg) scale(1.14);}45%{transform:rotateY(260deg) rotateX(130deg) scale(0.9);}65%{transform:rotateY(340deg) rotateX(190deg) scale(1.08);}85%{transform:rotateY(380deg) rotateX(340deg) scale(0.97);}100%{transform:rotateY(360deg) rotateX(360deg) scale(1);}}
+.roll-btn{position:relative;padding:17px 62px;font-family:'Orbitron',monospace;font-size:1rem;font-weight:700;letter-spacing:0.22em;text-transform:uppercase;color:#fff;background:linear-gradient(135deg,#6d28d9,#be185d,#c2410c);border:none;border-radius:50px;cursor:pointer;overflow:hidden;transition:transform 0.15s,box-shadow 0.2s;box-shadow:0 4px 30px rgba(109,40,217,0.5),0 0 0 1px rgba(255,255,255,0.08);}
+.roll-btn::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,0.2) 0%,transparent 55%);border-radius:50px;}
+.roll-btn::after{content:'';position:absolute;inset:-3px;background:linear-gradient(135deg,#6d28d9,#be185d,#c2410c);border-radius:53px;z-index:-1;filter:blur(12px);opacity:0.55;animation:btnGlow 2.5s ease-in-out infinite;}
+@keyframes btnGlow{0%,100%{opacity:0.3}50%{opacity:0.8}}
+.roll-btn:hover{transform:translateY(-3px) scale(1.04);box-shadow:0 10px 44px rgba(109,40,217,0.65);}
+.roll-btn:active{transform:scale(0.97);}
+.roll-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
+.result-panel{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.09);border-radius:18px;padding:18px 38px;text-align:center;min-width:260px;}
+.result-label{font-size:0.68rem;letter-spacing:0.35em;text-transform:uppercase;color:rgba(255,255,255,0.28);margin-bottom:8px;}
+.result-value{font-family:'Orbitron',monospace;font-size:1.9rem;font-weight:700;letter-spacing:0.3em;min-height:2.3rem;color:#fff;transition:opacity 0.25s;}
+.legend-section{width:100%;max-width:520px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:16px 22px;}
+.section-title{font-size:0.68rem;color:rgba(255,255,255,0.28);letter-spacing:0.3em;text-transform:uppercase;margin-bottom:12px;text-align:center;}
+.legend-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.legend-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.07);background:rgba(255,255,255,0.03);}
+.legend-swatch{width:28px;height:28px;border-radius:7px;flex-shrink:0;}
+.legend-text{display:flex;flex-direction:column;gap:1px;}
+.legend-key{font-family:'Orbitron',monospace;font-size:0.75rem;font-weight:700;line-height:1;}
+.legend-name{font-size:0.72rem;color:rgba(255,255,255,0.45);font-weight:600;line-height:1;}
+.legend-pct{font-size:0.65rem;color:rgba(255,255,255,0.28);font-weight:600;line-height:1;margin-top:2px;}
+.bg-section{width:100%;max-width:520px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:14px 22px;}
+.bg-themes{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:10px;}
+.bg-btn{display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;border:2px solid rgba(255,255,255,0.08);border-radius:12px;padding:8px 14px;background:rgba(255,255,255,0.03);transition:all 0.2s;}
+.bg-btn:hover{border-color:rgba(255,255,255,0.25);background:rgba(255,255,255,0.07);transform:translateY(-2px);}
+.bg-btn.active{border-color:rgba(255,255,255,0.55);background:rgba(255,255,255,0.08);}
+.bg-preview{width:36px;height:36px;border-radius:8px;}
+.bg-name{font-size:0.65rem;color:rgba(255,255,255,0.45);letter-spacing:0.1em;text-transform:uppercase;font-weight:600;}
+.bg-btn.active .bg-name{color:rgba(255,255,255,0.8);}
+.bg-btn[data-bg="cosmic"] .bg-preview{background:radial-gradient(circle at 40% 40%,#3b1f7a,#0d0820,#060610);}
+.bg-btn[data-bg="fire"]   .bg-preview{background:radial-gradient(circle at 40% 40%,#92200a,#4a0d00,#100200);}
+.bg-btn[data-bg="ocean"]  .bg-preview{background:radial-gradient(circle at 40% 40%,#0e4f80,#052a50,#010a18);}
+.bg-btn[data-bg="forest"] .bg-preview{background:radial-gradient(circle at 40% 40%,#155e30,#073818,#020d06);}
+.bg-btn[data-bg="neon"]   .bg-preview{background:radial-gradient(circle at 40% 40%,#3d1480,#1a0540,#060110);}
+.bg-btn[data-bg="sunset"] .bg-preview{background:radial-gradient(circle at 40% 40%,#7c2d50,#3d0e28,#0f0408);}
+.particle{position:fixed;pointer-events:none;border-radius:50%;animation:particleFly 1s ease-out forwards;z-index:20;}
+@keyframes particleFly{0%{opacity:1;transform:scale(1) translate(0,0)}100%{opacity:0;transform:scale(0) translate(var(--tx),var(--ty))}}
+</style>
+</head>
+<body>
+<canvas id="bg-canvas"></canvas>
+<div class="app">
+  <div class="title-wrap">
+    <div class="site-title">TARIKIYE DICE</div>
+    <div class="site-subtitle">COLOR DICE FOR SAB</div>
+  </div>
+  <div class="controls-row">
+    <span class="ctrl-label">Zar Sayısı</span>
+    <div class="dice-count-btns" id="countBtns">
+      <button class="count-btn" data-n="1">1</button>
+      <button class="count-btn" data-n="2">2</button>
+      <button class="count-btn" data-n="3">3</button>
+      <button class="count-btn active" data-n="4">4</button>
+      <button class="count-btn" data-n="5">5</button>
+      <button class="count-btn" data-n="6">6</button>
+    </div>
+  </div>
+  <div class="dice-area" id="diceArea"></div>
+  <button class="roll-btn" id="rollBtn" onclick="rollAll()">ZAR AT</button>
+  <div class="result-panel">
+    <div class="result-label">Sonuç</div>
+    <div class="result-value" id="resultValue">– – – –</div>
+  </div>
+  <div class="legend-section">
+    <div class="section-title">Renk Seçenekleri — Her biri %16.7</div>
+    <div class="legend-grid" id="legendGrid"></div>
+  </div>
+  <div class="bg-section">
+    <div class="section-title">Arkaplan Teması</div>
+    <div class="bg-themes">
+      <button class="bg-btn active" data-bg="cosmic"><div class="bg-preview"></div><span class="bg-name">Kozmik</span></button>
+      <button class="bg-btn" data-bg="fire">  <div class="bg-preview"></div><span class="bg-name">Ates</span></button>
+      <button class="bg-btn" data-bg="ocean"> <div class="bg-preview"></div><span class="bg-name">Okyanus</span></button>
+      <button class="bg-btn" data-bg="forest"><div class="bg-preview"></div><span class="bg-name">Orman</span></button>
+      <button class="bg-btn" data-bg="neon">  <div class="bg-preview"></div><span class="bg-name">Neon</span></button>
+      <button class="bg-btn" data-bg="sunset"><div class="bg-preview"></div><span class="bg-name">Gece</span></button>
+    </div>
+  </div>
+</div>
+<script>
+const COLORS=[
+  {key:'K',name:'Kirmizi',bg:'#ef4444',glow:'rgba(239,68,68,0.8)'},
+  {key:'Y',name:'Yesil',  bg:'#22c55e',glow:'rgba(34,197,94,0.8)'},
+  {key:'M',name:'Mavi',   bg:'#3b82f6',glow:'rgba(59,130,246,0.8)'},
+  {key:'S',name:'Sari',   bg:'#f59e0b',glow:'rgba(245,158,11,0.8)'},
+  {key:'P',name:'Mor',    bg:'#a855f7',glow:'rgba(168,85,247,0.8)'},
+  {key:'T',name:'Turuncu',bg:'#f97316',glow:'rgba(249,115,22,0.8)'},
+];
+
+// Tam eşit olasılık: Fisher-Yates ile karıştırılmış deste sistemi
+// Her 6 zar atımında her renk tam olarak 1 kez çıkar — gerçek eşitlik
+let deck=[];
+function refillDeck(){
+  deck=[...COLORS];
+  for(let i=deck.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [deck[i],deck[j]]=[deck[j],deck[i]];
+  }
+}
+function drawColor(){
+  if(deck.length===0)refillDeck();
+  return deck.pop();
+}
+refillDeck();
+
+const BG={
+  cosmic:{p1:'#14093a',p2:'#060610',orb1:'rgba(110,40,220,',orb2:'rgba(200,40,120,',star:'rgba(200,170,255,'},
+  fire:  {p1:'#3a0900',p2:'#0e0100',orb1:'rgba(210,35,10,', orb2:'rgba(230,95,10,', star:'rgba(255,170,90,'},
+  ocean: {p1:'#041e3a',p2:'#010812',orb1:'rgba(20,80,210,', orb2:'rgba(0,170,210,', star:'rgba(100,210,255,'},
+  forest:{p1:'#051a0a',p2:'#010602',orb1:'rgba(15,130,45,', orb2:'rgba(65,160,15,', star:'rgba(130,240,150,'},
+  neon:  {p1:'#0e0428',p2:'#050010',orb1:'rgba(148,40,240,',orb2:'rgba(230,40,160,',star:'rgba(230,150,255,'},
+  sunset:{p1:'#220a18',p2:'#0a0206',orb1:'rgba(160,30,80,', orb2:'rgba(100,10,50,', star:'rgba(255,160,200,'},
+};
+
+let diceCount=4,currentBg='cosmic',rolling=false;
+const canvas=document.getElementById('bg-canvas');
+const ctx=canvas.getContext('2d');
+let W,H,stars=[],orbs=[],frame=0;
+
+function initCanvas(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+  stars=Array.from({length:110},()=>({
+    x:Math.random()*W,y:Math.random()*H,
+    r:Math.random()*1.3+0.2,
+    speed:Math.random()*0.2+0.05,
+    phase:Math.random()*Math.PI*2
+  }));
+  orbs=Array.from({length:4},()=>({
+    x:Math.random()*W,y:Math.random()*H,
+    r:Math.random()*160+130,
+    vx:(Math.random()-0.5)*0.28,
+    vy:(Math.random()-0.5)*0.28,
+    phase:Math.random()*Math.PI*2
+  }));
+}
+
+function drawBg(){
+  const t=BG[currentBg];
+  const g=ctx.createRadialGradient(W/2,H*0.38,0,W/2,H/2,Math.max(W,H)*0.9);
+  g.addColorStop(0,t.p1);g.addColorStop(1,t.p2);
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  orbs.forEach((o,i)=>{
+    o.x+=o.vx;o.y+=o.vy;
+    if(o.x<-o.r||o.x>W+o.r)o.vx*=-1;
+    if(o.y<-o.r||o.y>H+o.r)o.vy*=-1;
+    const a=0.03+0.015*Math.sin(frame*0.007+o.phase);
+    const og=ctx.createRadialGradient(o.x,o.y,0,o.x,o.y,o.r);
+    const col=i%2===0?t.orb1:t.orb2;
+    og.addColorStop(0,col+a+')');og.addColorStop(1,col+'0)');
+    ctx.fillStyle=og;ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();
+  });
+  stars.forEach(s=>{
+    const a=0.3+0.35*Math.sin(frame*s.speed+s.phase);
+    ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+    ctx.fillStyle=t.star+a+')';ctx.fill();
+  });
+  frame++;requestAnimationFrame(drawBg);
+}
+
+function buildLegend(){
+  const grid=document.getElementById('legendGrid');
+  grid.innerHTML=COLORS.map(c=>`
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:${c.bg};box-shadow:0 0 10px ${c.glow},0 0 20px ${c.glow.replace('0.8','0.3')}"></div>
+      <div class="legend-text">
+        <span class="legend-key" style="color:${c.bg};text-shadow:0 0 10px ${c.glow}">${c.key}</span>
+        <span class="legend-name">${c.name}</span>
+        <span class="legend-pct">1/6 sans</span>
+      </div>
+    </div>`).join('');
+}
+
+function applyColor(die,c){
+  die.style.background=c.bg;
+  die.style.boxShadow=`0 6px 30px ${c.glow},0 0 60px ${c.glow.replace('0.8','0.2')},inset 0 1px 0 rgba(255,255,255,0.28),inset 0 -2px 0 rgba(0,0,0,0.25)`;
+}
+
+function buildDice(){
+  const area=document.getElementById('diceArea');
+  area.innerHTML='';
+  refillDeck();
+  for(let i=0;i<diceCount;i++){
+    const c=drawColor();
+    const wrap=document.createElement('div');
+    wrap.className='die-wrap';
+    wrap.innerHTML=`<div class="die" id="die${i}" data-color="${c.key}"
+      style="background:${c.bg};box-shadow:0 6px 30px ${c.glow},0 0 60px ${c.glow.replace('0.8','0.2')},inset 0 1px 0 rgba(255,255,255,0.28),inset 0 -2px 0 rgba(0,0,0,0.25)">
+      <div class="die-shine"></div>
+      <div class="die-dot"></div>
+    </div>`;
+    area.appendChild(wrap);
+  }
+  updateResult();
+}
+
+function rollAll(){
+  if(rolling)return;
+  rolling=true;
+  const btn=document.getElementById('rollBtn');
+  btn.disabled=true;
+  document.getElementById('resultValue').style.opacity='0.2';
+
+  // Her zar atışı için rengi önceden belirle — Math.random() tek çağrı, eşit dağılım
+  const results=Array.from({length:diceCount},()=>drawColor());
+  let done=0;
+
+  for(let i=0;i<diceCount;i++){
+    const die=document.getElementById('die'+i);
+    const c=results[i];
+    const delay=i*80;
+    setTimeout(()=>{
+      die.classList.add('rolling');
+      spawnParticles(die,c.bg,c.glow);
+    },delay);
+    setTimeout(()=>{
+      die.dataset.color=c.key;
+      applyColor(die,c);
+      die.classList.remove('rolling');
+      done++;
+      if(done===diceCount){
+        updateResult();
+        rolling=false;
+        btn.disabled=false;
+        document.getElementById('resultValue').style.opacity='1';
+      }
+    },delay+700);
+  }
+}
+
+function updateResult(){
+  const vals=[];
+  for(let i=0;i<diceCount;i++){const d=document.getElementById('die'+i);if(d)vals.push(d.dataset.color);}
+  document.getElementById('resultValue').innerHTML=vals.map(k=>{
+    const col=COLORS.find(x=>x.key===k);
+    return `<span style="color:${col.bg};text-shadow:0 0 18px ${col.glow},0 0 36px ${col.glow.replace('0.8','0.4')}">${k}</span>`;
+  }).join(' ');
+}
+
+function spawnParticles(el,bg,glow){
+  const r=el.getBoundingClientRect();
+  const cx=r.left+r.width/2,cy=r.top+r.height/2;
+  for(let i=0;i<14;i++){
+    const p=document.createElement('div');p.className='particle';
+    const a=Math.random()*Math.PI*2,d=55+Math.random()*85;
+    p.style.cssText=`width:${3+Math.random()*6}px;height:${3+Math.random()*6}px;background:${bg};box-shadow:0 0 6px ${glow};left:${cx}px;top:${cy}px;--tx:${Math.cos(a)*d}px;--ty:${Math.sin(a)*d}px;`;
+    document.body.appendChild(p);setTimeout(()=>p.remove(),1000);
+  }
+}
+
+document.getElementById('countBtns').addEventListener('click',e=>{
+  const btn=e.target.closest('.count-btn');
+  if(!btn||rolling)return;
+  document.querySelectorAll('.count-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  diceCount=parseInt(btn.dataset.n);
+  buildDice();
+});
+
+document.querySelectorAll('.bg-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.bg-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    currentBg=btn.dataset.bg;
+  });
+});
+
+window.addEventListener('resize',initCanvas);
+initCanvas();drawBg();buildLegend();buildDice();
+</script>
+</body>
+</html>
