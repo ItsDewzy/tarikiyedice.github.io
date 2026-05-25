@@ -820,6 +820,635 @@ window.addEventListener('load', () => {
   drawBg();
   buildLegend();
   buildDice();
+ 
+(function () {
+  "use strict";
+
+  // ─────────────────────────────────────────────
+  // 0. KONFİGÜRASYON
+  // ─────────────────────────────────────────────
+  const CFG = {
+    warnOnCheat: true,        // Hile girişiminde ekranda uyarı göster
+    lockOnDevTools: true,     // DevTools açıkken oyunu kilitle
+    blockContextMenu: true,   // Sağ tık engelle
+    blockKeyboardShortcuts: true, // F12 / Ctrl+Shift+I vb. engelle
+    blockSelection: true,     // Metin seçimi engelle
+    blockDragDrop: true,      // Drag & drop engelle
+    protectStorage: true,     // Storage manipülasyonunu engelle
+    freezeRNG: true,          // RNG fonksiyonlarını dondur
+    mutationGuard: true,      // DOM değişikliği koruma
+    devToolsCheckInterval: 800, // ms
+    maxCheatAttempts: 3,      // Bu kadar sonra kilitle
+  };
+
+  // ─────────────────────────────────────────────
+  // 1. DURUM
+  // ─────────────────────────────────────────────
+  let cheatAttempts = 0;
+  let gameLocked = false;
+  let devToolsOpen = false;
+
+  // ─────────────────────────────────────────────
+  // 2. GÖRSEL UYARI OVERLAY
+  // ─────────────────────────────────────────────
+  function injectStyles() {
+    const style = document.createElement("style");
+    style.textContent = `
+      #ac-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        background: rgba(0,0,0,0.97);
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 18px;
+        font-family: 'Orbitron', 'Courier New', monospace;
+        color: #fff;
+        text-align: center;
+        padding: 2rem;
+        backdrop-filter: blur(20px);
+      }
+      #ac-overlay.visible { display: flex; }
+      #ac-overlay .ac-icon {
+        font-size: 4rem;
+        animation: ac-pulse 1s ease-in-out infinite;
+      }
+      @keyframes ac-pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.15)} }
+      #ac-overlay .ac-title {
+        font-size: clamp(1.2rem,4vw,2rem);
+        font-weight: 900;
+        letter-spacing: 0.12em;
+        background: linear-gradient(135deg,#ef4444,#f97316);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      #ac-overlay .ac-msg {
+        font-size: 0.85rem;
+        color: rgba(255,255,255,0.5);
+        letter-spacing: 0.08em;
+        max-width: 420px;
+        line-height: 1.7;
+      }
+      #ac-overlay .ac-code {
+        font-size: 0.7rem;
+        color: rgba(239,68,68,0.6);
+        letter-spacing: 0.2em;
+        border: 1px solid rgba(239,68,68,0.2);
+        padding: 6px 14px;
+        border-radius: 6px;
+        font-family: monospace;
+      }
+      #ac-overlay .ac-btn {
+        margin-top: 8px;
+        padding: 12px 36px;
+        background: linear-gradient(135deg,#6d28d9,#be185d);
+        border: none;
+        border-radius: 50px;
+        color: #fff;
+        font-family: 'Orbitron','Courier New',monospace;
+        font-size: 0.85rem;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        cursor: pointer;
+        transition: opacity 0.2s;
+      }
+      #ac-overlay .ac-btn:hover { opacity: 0.8; }
+
+      #ac-toast {
+        position: fixed;
+        bottom: 28px; right: 28px;
+        z-index: 2147483646;
+        background: rgba(239,68,68,0.12);
+        border: 1px solid rgba(239,68,68,0.4);
+        border-radius: 12px;
+        padding: 12px 20px;
+        font-family: 'Orbitron','Courier New',monospace;
+        font-size: 0.72rem;
+        color: #ef4444;
+        letter-spacing: 0.1em;
+        max-width: 320px;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(16px);
+        transition: opacity 0.3s, transform 0.3s;
+        backdrop-filter: blur(12px);
+      }
+      #ac-toast.show { opacity: 1; transform: translateY(0); }
+
+      /* Oyun kilitliyken bulanık */
+      body.ac-locked .app,
+      body.ac-locked #bg-canvas,
+      body.ac-locked #fx-canvas {
+        filter: blur(12px) brightness(0.3);
+        pointer-events: none;
+        user-select: none;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function createOverlay() {
+    const el = document.createElement("div");
+    el.id = "ac-overlay";
+    el.innerHTML = `
+      <div class="ac-icon">🔒</div>
+      <div class="ac-title">HİLE TESPİT EDİLDİ</div>
+      <div class="ac-msg" id="ac-msg">
+        Oyunu değiştirmeye çalıştığın tespit edildi.<br>
+        Tarikiye Dice hilecileri sevmez.
+      </div>
+      <div class="ac-code" id="ac-code">AC-000</div>
+      <button class="ac-btn" onclick="window.location.reload()">SAYFAYI YENİLE</button>
+    `;
+    document.body.appendChild(el);
+  }
+
+  function createToast() {
+    const el = document.createElement("div");
+    el.id = "ac-toast";
+    document.body.appendChild(el);
+  }
+
+  function showToast(msg, duration = 3000) {
+    const t = document.getElementById("ac-toast");
+    if (!t) return;
+    t.textContent = "⚠ " + msg;
+    t.classList.add("show");
+    setTimeout(() => t.classList.remove("show"), duration);
+  }
+
+  function triggerCheat(code, msg, lockNow = false) {
+    cheatAttempts++;
+    console.warn("[TARIKIYE-AC] Hile girişimi:", code, msg);
+
+    if (CFG.warnOnCheat) showToast(msg);
+
+    if (lockNow || cheatAttempts >= CFG.maxCheatAttempts) {
+      lockGame(code, msg);
+    }
+  }
+
+  function lockGame(code = "AC-ERR", msg = "Hile tespit edildi.") {
+    if (gameLocked) return;
+    gameLocked = true;
+    document.body.classList.add("ac-locked");
+
+    const overlay = document.getElementById("ac-overlay");
+    const msgEl = document.getElementById("ac-msg");
+    const codeEl = document.getElementById("ac-code");
+    if (msgEl) msgEl.innerHTML = msg;
+    if (codeEl) codeEl.textContent = code;
+    if (overlay) overlay.classList.add("visible");
+
+    // Oyun butonunu devre dışı bırak
+    const rollBtn = document.getElementById("rollBtn");
+    if (rollBtn) rollBtn.disabled = true;
+  }
+
+  // ─────────────────────────────────────────────
+  // 3. DEVTOOLS TESPİTİ
+  // ─────────────────────────────────────────────
+  function checkDevTools() {
+    // Yöntem 1: window boyutu farkı
+    const threshold = 160;
+    const widthDiff = window.outerWidth - window.innerWidth;
+    const heightDiff = window.outerHeight - window.innerHeight;
+    const sizeDetected = widthDiff > threshold || heightDiff > threshold;
+
+    // Yöntem 2: console.log ile obje formatlama trick (Chromium)
+    let devtoolsViaConsole = false;
+    const devtoolsObj = Object.create(null);
+    Object.defineProperty(devtoolsObj, "ac_check", {
+      get() { devtoolsViaConsole = true; return ""; },
+    });
+    // eslint-disable-next-line no-console
+    console.log("%c", devtoolsObj);
+
+    // Yöntem 3: debugger zamanlama testi
+    let timingDetected = false;
+    const t0 = performance.now();
+    // eslint-disable-next-line no-debugger
+    debugger;
+    const t1 = performance.now();
+    if (t1 - t0 > 80) timingDetected = true; // DevTools paused
+
+    const isOpen = sizeDetected || devtoolsViaConsole || timingDetected;
+
+    if (isOpen && !devToolsOpen) {
+      devToolsOpen = true;
+      if (CFG.lockOnDevTools) {
+        triggerCheat(
+          "AC-001",
+          "Geliştirici araçları açık olduğunda oyun kilitlenir.<br>DevTools'u kapatıp sayfayı yenile.",
+          true
+        );
+      }
+    } else if (!isOpen && devToolsOpen) {
+      devToolsOpen = false;
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // 4. KLAVYE KISA YOL ENGELİ
+  // ─────────────────────────────────────────────
+  function setupKeyboardBlock() {
+    if (!CFG.blockKeyboardShortcuts) return;
+    document.addEventListener("keydown", (e) => {
+      // F12
+      if (e.key === "F12") {
+        e.preventDefault(); e.stopPropagation();
+        triggerCheat("AC-002", "F12 devtools kısayolu engellendi.");
+        return false;
+      }
+      // Ctrl/Cmd + Shift + I/J/C/K/U/S
+      if ((e.ctrlKey || e.metaKey)) {
+        const blocked = {
+          I: "Inspect", J: "Console", C: "Inspector",
+          K: "Console (FF)", U: "View Source", S: "Save Page",
+          P: "Print", F: "Find", A: "Select All",
+        };
+        const upper = e.key.toUpperCase();
+        if (blocked[upper]) {
+          e.preventDefault(); e.stopPropagation();
+          triggerCheat("AC-003", `Kısayol engellendi: Ctrl+${upper} (${blocked[upper]})`);
+          return false;
+        }
+        // Ctrl+Shift kombinasyonları
+        if (e.shiftKey && ["I","J","C","K","E"].includes(upper)) {
+          e.preventDefault(); e.stopPropagation();
+          triggerCheat("AC-003", "DevTools kısayolu engellendi.");
+          return false;
+        }
+      }
+    }, true);
+  }
+
+  // ─────────────────────────────────────────────
+  // 5. SAĞ TIK ENGELİ
+  // ─────────────────────────────────────────────
+  function setupContextMenuBlock() {
+    if (!CFG.blockContextMenu) return;
+    document.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      triggerCheat("AC-004", "Sağ tık menüsü engellendi.");
+      return false;
+    }, true);
+  }
+
+  // ─────────────────────────────────────────────
+  // 6. METİN SEÇİMİ / DRAG ENGELİ
+  // ─────────────────────────────────────────────
+  function setupSelectionBlock() {
+    if (CFG.blockSelection) {
+      document.addEventListener("selectstart", (e) => { e.preventDefault(); return false; }, true);
+      document.addEventListener("copy", (e) => { e.preventDefault(); }, true);
+    }
+    if (CFG.blockDragDrop) {
+      document.addEventListener("dragstart", (e) => { e.preventDefault(); return false; }, true);
+      document.addEventListener("drop", (e) => { e.preventDefault(); return false; }, true);
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // 7. CONSOLE OVERRIDE — console'u kapat
+  // ─────────────────────────────────────────────
+  function lockConsole() {
+    const originalWarn = console.warn.bind(console); // AC kendi logları için sakla
+    const noop = () => {};
+    const blocked = ["log","error","info","debug","dir","table","trace","group","groupCollapsed","time","timeEnd"];
+    blocked.forEach((m) => {
+      try {
+        Object.defineProperty(console, m, {
+          get() { return noop; },
+          set() {},
+          configurable: false,
+        });
+      } catch (_) {}
+    });
+    // Uyarıları AC içinde kullanmak için sakla
+    window.__ac_warn = originalWarn;
+  }
+
+  // ─────────────────────────────────────────────
+  // 8. DOM MUTATION GUARD
+  // ─────────────────────────────────────────────
+  function setupMutationGuard() {
+    if (!CFG.mutationGuard) return;
+
+    // Korunan element ID'leri
+    const protectedIds = new Set([
+      "rollBtn", "diceArea", "resultValue", "countBtns",
+      "legendGrid", "bg-canvas", "fx-canvas",
+    ]);
+
+    // Başlangıç snapshot'ı
+    const snapshots = {};
+    protectedIds.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) snapshots[id] = el.innerHTML;
+    });
+
+    const observer = new MutationObserver((mutations) => {
+      if (gameLocked) return;
+
+      mutations.forEach((m) => {
+        // Yeni script/iframe inject?
+        if (m.type === "childList") {
+          m.addedNodes.forEach((node) => {
+            if (node.tagName === "SCRIPT") {
+              const src = node.src || node.textContent || "";
+              // Kendi anticheat dışındaki scriptler
+              if (!src.includes("tarikiye-anticheat")) {
+                node.remove();
+                triggerCheat("AC-005", "Yetkisiz script inject engellendi.", true);
+              }
+            }
+            if (node.tagName === "IFRAME") {
+              node.remove();
+              triggerCheat("AC-005", "iFrame inject engellendi.", true);
+            }
+          });
+        }
+
+        // Korunan attributelar değişti mi?
+        if (m.type === "attributes") {
+          const target = m.target;
+          const id = target.id;
+          if (id === "rollBtn" && m.attributeName === "disabled") {
+            // Sadece kendi kodumuzu geçir; dışarıdan disabled kaldırılmasını engelle
+            if (gameLocked && !target.disabled) {
+              target.disabled = true;
+              triggerCheat("AC-006", "Zar butonu koruması devreye girdi.");
+            }
+          }
+        }
+
+        // dice sayısı veya result manipülasyonu?
+        if (m.type === "characterData" || m.type === "childList") {
+          const rval = document.getElementById("resultValue");
+          if (rval && m.target && rval.contains(m.target)) {
+            // Animasyon sürecinde değil ve oyun dışından bir değişiklik
+            if (!rolling && gameLocked) {
+              triggerCheat("AC-007", "Sonuç değeri dış müdahaleye karşı korunuyor.", true);
+            }
+          }
+        }
+      });
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["disabled", "style", "class", "data-color-idx"],
+      characterData: true,
+    });
+  }
+
+  // ─────────────────────────────────────────────
+  // 9. STORAGE KORUMASI
+  // ─────────────────────────────────────────────
+  function protectStorage() {
+    if (!CFG.protectStorage) return;
+
+    // localStorage override
+    const _lsSet = localStorage.setItem.bind(localStorage);
+    const _lsGet = localStorage.getItem.bind(localStorage);
+
+    const blockedKeys = ["rollResult", "diceColors", "diceCount", "cheat", "hack", "tamper"];
+
+    try {
+      Object.defineProperty(window, "localStorage", {
+        get() {
+          return new Proxy(window.localStorage.__proto__.constructor.prototype, {
+            get(target, prop) {
+              if (prop === "setItem") {
+                return (key, value) => {
+                  if (blockedKeys.some((k) => key.toLowerCase().includes(k))) {
+                    triggerCheat("AC-008", `localStorage['${key}'] yazma engellendi.`);
+                    return;
+                  }
+                  _lsSet(key, value);
+                };
+              }
+              return target[prop];
+            },
+          });
+        },
+        configurable: false,
+      });
+    } catch (_) {
+      // Proxy desteklenmiyorsa basit override
+      const origSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (blockedKeys.some((k) => key.toLowerCase().includes(k))) {
+          triggerCheat("AC-008", `Storage manipülasyonu engellendi: ${key}`);
+          return;
+        }
+        return origSet.call(this, key, value);
+      };
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // 10. RNG & OYUN FONKSİYONLARINI DONDUR
+  // ─────────────────────────────────────────────
+  function freezeGameFunctions() {
+    if (!CFG.freezeRNG) return;
+
+    // Kısa süre sonra ana kodun yüklenmesini bekle
+    setTimeout(() => {
+      // rollColors, secureRandom gibi kritik fonksiyonlar
+      const criticalFns = ["rollColors", "secureRandom", "rollFourWithWinBias", "animateDie", "rollAll"];
+      criticalFns.forEach((fnName) => {
+        if (typeof window[fnName] === "function") {
+          const original = window[fnName];
+          try {
+            Object.defineProperty(window, fnName, {
+              get() { return original; },
+              set() {
+                triggerCheat("AC-009", `Kritik fonksiyon değiştirme girişimi: window.${fnName}`, true);
+              },
+              configurable: false,
+            });
+          } catch (_) {}
+        }
+      });
+
+      // Math.random override engelini koy
+      const origMathRandom = Math.random;
+      try {
+        Object.defineProperty(Math, "random", {
+          get() { return origMathRandom; },
+          set() {
+            triggerCheat("AC-010", "Math.random override engellendi!", true);
+          },
+          configurable: false,
+        });
+      } catch (_) {}
+
+      // COLORS dizisini dondur
+      if (window.COLORS && Array.isArray(window.COLORS)) {
+        try { Object.freeze(window.COLORS); } catch (_) {}
+      }
+    }, 500);
+  }
+
+  // ─────────────────────────────────────────────
+  // 11. VIEW-SOURCE ENGELİ
+  // ─────────────────────────────────────────────
+  function blockViewSource() {
+    // view-source: protokolünü engelle (link tıklaması)
+    document.addEventListener("click", (e) => {
+      const a = e.target.closest("a");
+      if (a && a.href && a.href.startsWith("view-source:")) {
+        e.preventDefault();
+        triggerCheat("AC-011", "view-source erişimi engellendi.");
+      }
+    }, true);
+  }
+
+  // ─────────────────────────────────────────────
+  // 12. NETWORK REQUEST MONİTORÜ (Service Worker yoksa basic)
+  // ─────────────────────────────────────────────
+  function monitorFetch() {
+    const origFetch = window.fetch;
+    window.fetch = function (...args) {
+      const url = typeof args[0] === "string" ? args[0] : (args[0] && args[0].url) || "";
+      // Oyun dışına veri gönderme girişimi (kendi origin dışı POST)
+      const isExternal = url.startsWith("http") && !url.startsWith(window.location.origin);
+      const isSuspicious = url.includes("hack") || url.includes("cheat") || url.includes("tamper");
+      if (isExternal && isSuspicious) {
+        triggerCheat("AC-012", `Şüpheli ağ isteği engellendi: ${url}`, true);
+        return Promise.reject(new Error("Blocked by Tarikiye Anti-Cheat"));
+      }
+      return origFetch.apply(this, args);
+    };
+  }
+
+  // ─────────────────────────────────────────────
+  // 13. SAYFA GÖRÜNÜRLÜK DEĞİŞİMİ (Tab switch)
+  // ─────────────────────────────────────────────
+  function setupVisibilityGuard() {
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        // Sekme kapatıldığında entropi tohumunu sıfırla
+        if (typeof window.initRng === "function") {
+          try { window.initRng(); } catch (_) {}
+        }
+      }
+    });
+  }
+
+  // ─────────────────────────────────────────────
+  // 14. ANTI INSPECT — Element üzerine atanan
+  //     inline style değişikliklerini izle
+  // ─────────────────────────────────────────────
+  function guardInlineStyles() {
+    const diceArea = document.getElementById("diceArea");
+    if (!diceArea) return;
+
+    // die-cube'lerin data-color-idx'ini izle
+    const styleObserver = new MutationObserver((muts) => {
+      muts.forEach((m) => {
+        if (m.type === "attributes" && m.attributeName === "data-color-idx" && !rolling) {
+          const newVal = m.target.getAttribute("data-color-idx");
+          const oldVal = m.oldValue;
+          // Rolling sırasında değil ama değer değiştiyse şüpheli
+          if (oldVal !== null && oldVal !== newVal && !rolling) {
+            triggerCheat(
+              "AC-013",
+              `Zar rengi dış müdahaleyle değiştirilmeye çalışıldı (${oldVal}→${newVal}).`,
+              true
+            );
+            m.target.setAttribute("data-color-idx", oldVal); // geri al
+          }
+        }
+      });
+    });
+
+    styleObserver.observe(diceArea, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-color-idx"],
+      attributeOldValue: true,
+    });
+  }
+
+  // ─────────────────────────────────────────────
+  // 15. ROLLING DEĞİŞKENİNİ PROXY İLE KORU
+  // ─────────────────────────────────────────────
+  let _rolling = false;
+  const rollingProxy = {
+    get rolling() { return _rolling; },
+    set rolling(v) {
+      if (typeof v !== "boolean") {
+        triggerCheat("AC-014", "rolling değişkeni manipüle edilmeye çalışıldı.", true);
+        return;
+      }
+      _rolling = v;
+    },
+  };
+  // Genel `rolling` değişkenini gözlemle
+  try {
+    Object.defineProperty(window, "rolling", {
+      get() { return rollingProxy.rolling; },
+      set(v) { rollingProxy.rolling = v; },
+      configurable: false,
+    });
+  } catch (_) {}
+
+  // ─────────────────────────────────────────────
+  // 16. BAŞLATMA
+  // ─────────────────────────────────────────────
+  function init() {
+    injectStyles();
+    createOverlay();
+    createToast();
+
+    setupKeyboardBlock();
+    setupContextMenuBlock();
+    setupSelectionBlock();
+    blockViewSource();
+    monitorFetch();
+    setupVisibilityGuard();
+    lockConsole();
+    protectStorage();
+    freezeGameFunctions();
+
+    // DOM yüklendikten sonra
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => {
+        setupMutationGuard();
+        guardInlineStyles();
+      });
+    } else {
+      setupMutationGuard();
+      guardInlineStyles();
+    }
+
+    // DevTools periyodik kontrolü
+    setInterval(checkDevTools, CFG.devToolsCheckInterval);
+
+    // İlk kontrol gecikmeli (sayfa yüklenmesini bekle)
+    setTimeout(checkDevTools, 1200);
+
+    // eslint-disable-next-line no-console
+    console.warn = () => {}; // kendi loglarımızı da gizle
+
+    showToast("Tarikiye Anti-Cheat aktif.", 2000);
+  }
+
+  // DOM hazır değilse bekle
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+
+})();
 });
 </script>
 </body>
